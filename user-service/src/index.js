@@ -5,6 +5,7 @@ const helmet = require("helmet");
 const { config } = require("./config");
 const logger = require("./config/logger");
 
+const authRoutes = require("./routes/auth.routes");
 const { corsMiddleware } = require("./middlewares/cors.middleware");
 const errorHandler = require("./middlewares/error.middleware");
 const { reqLogger } = require("./middlewares/req.middleware");
@@ -56,6 +57,8 @@ app.use(cookieParser());
 // Parses JSON request bodies.
 app.use(express.json());
 
+//auth routes
+app.use("/api/auth", authRoutes);
 /*
  * ---------------------------------------------------------
  * BASIC ROUTES
