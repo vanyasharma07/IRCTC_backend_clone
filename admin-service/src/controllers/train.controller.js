@@ -1,75 +1,61 @@
 const asyncHandler = require("../utils/asyncHandler");
-const { BadRequestError } = require('../utils/error')
-const stationService = require('../services/station.service');
+const { BadRequestError } = require("../utils/error");
+const trainService = require('../services/train.service');
 
 
-exports.createStation = asyncHandler(async (req, res) => {
-     const { name, code, city, state } = req.body;
+exports.createTrain = asyncHandler(async(req, res) =>{
+     const {trainNumber, trainName, coachName, seats} = req.body;
 
-     if (!name || !code || !city || !state) {
-          throw new BadRequestError('stationCode, stationName, city and state are required');
+     if(!trainNumber || !trainName || !coachName || !seats){
+          throw new BadRequestError("trainNumber, trainName, and seats are required");
      }
 
-     const station = await stationService.createStation({
-          code: code.toUpperCase(),
-          name,
-          city,
-          state
-     });
+     if(seats.length === 0){
+          throw new BadRequestError("Atleast one seat must be defined...")
+     }
 
-     res.status(201).json({
+     const train = await trainService.createTrain({trainNumber, trainName, coachName, seats});
+     return res.status(201).json({
           success: true,
-          message: 'Station Created Successfully',
-          data: station
+          message: "Train added successfully",
+          data: train
      })
 })
 
-
-exports.getAllStations = asyncHandler(async (req, res) => {
-     const page = parseInt(req.query.page) || 1;
-     const limit = parseInt(req.query.limit) || 50;
-     const search = req.query.search;
-
-     const result = await stationService.getAllStations(page, limit, search);
-
-     res.status(200).json({
-          success: true,
-          data: result.stations,
-          pagination: {
-               page,
-               limit,
-               total: result.total,
-               totalPages: Math.ceil(result.total / limit)
-          }
-     });
-});
-
-exports.getStationById = asyncHandler(async (req, res) => {
-     const { stationId } = req.params;
-     if(!stationId){
-          throw new BadRequestError("Station Id is missing");
+exports.createRoute = asyncHandler(async(req, res) =>{
+     const {trainId, stations} = req.body;
+     if(!trainId || !stations){
+          throw new BadRequestError("Train Id and stations are required");
      }
-     const station = await stationService.getStationById(stationId);
 
-     res.status(200).json({
-          success: true,
-          data: station
-     });
-});
-
-exports.getStationByIdInternal = asyncHandler(async (req, res) => {
-     const { stationId } = req.params;
-     if(!stationId){
-          throw new BadRequestError("Station Id is missing");
+     if(stations.length < 2){
+          throw new BadRequestError("A route must have at least 2 stations (origin and destination)");
      }
-     const station = await stationService.getStationById(stationId);
 
-     res.status(200).json({
+     const route = await trainService.createRoute({trainId, stations});
+     return res.status(201).json({
           success: true,
-          data: station ? {
-               id: station.id,
-               name: station.name,
-               code: station.code,
-          } : null
+          message: "Route Created",
+          data: route
      });
 });
+
+exports.getAllTrains = asyncHandler(async(req, res) =>{
+     const trains = await trainService.getAllTrains();
+     return res.status(200).json({
+          success: true,
+          data: trains
+     })
+})
+
+exports.getTrainById = asyncHandler(async(req, res) =>{
+     const {trainId} = req.params;
+     if(!trainId){
+          throw new BadRequestError("Train Id is missing");
+     }
+     const train = await trainService.getTrainById(trainId);
+     return res.status(200).json({
+          success: true,
+          data: train
+     })
+})

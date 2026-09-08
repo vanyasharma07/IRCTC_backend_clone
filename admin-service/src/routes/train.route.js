@@ -9,4 +9,4 @@ router.get("/train", getUserContext, getAllTrains);
 router.get("/train/:trainId", getUserContext, getTrainById);
 router.post("/route", getUserContext, createRoute);
 
-module.exports = router; station.service.js
+module.exports = router; 
