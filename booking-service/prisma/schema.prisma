@@ -1,0 +1,165 @@
+// ─── Prisma Schema: Booking Service ──────────────────────────────────────────
+//
+// This schema defines the data model for the booking microservice.
+// It manages the full booking lifecycle using a saga pattern:
+//   PENDING → SEATS_HELD → PAYMENT_PENDING → CONFIRMING → CONFIRMED
+//
+// Key design decisions:
+// - Optimistic concurrency via `version` field (CAS pattern)
+// - Idempotency records prevent duplicate bookings from retries
+// - SagaLog provides an audit trail for each step, enabling crash recovery
+// - Segment booking support (fromStationId/toStationId) for partial-route tickets
+
+generator client {
+  provider        = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Booking Status State Machine ────────────────────────────────────────────
+// PENDING         → Initial state after user submits a booking request
+// SEATS_HELD      → Inventory service has temporarily reserved the seats
+// PAYMENT_PENDING → Payment order created, waiting for user to pay
+// CONFIRMING      → Payment received, confirming seats with inventory
+// CONFIRMED       → Booking fully confirmed — tickets issued
+// CANCELLING      → User or system initiated cancellation in progress
+// FAILED          → A saga step failed (seats unavailable, payment error, etc.)
+// CANCELLED       → Successfully cancelled (seats released, refund if applicable)
+// EXPIRED         → Booking timed out before payment was completed
+
+enum BookingStatus {
+  PENDING
+  SEATS_HELD
+  PAYMENT_PENDING
+  CONFIRMING
+  CONFIRMED
+  CANCELLING
+  FAILED
+  CANCELLED
+  EXPIRED
+}
+
+// ─── Saga Steps & Statuses ──────────────────────────────────────────────────
+// Each step in the saga is tracked for auditability and compensation
+
+enum SagaStep {
+  HOLD_SEATS
+  CREATE_PAYMENT
+  CONFIRM_SEATS
+  COMPLETE
+}
+
+enum SagaStepStatus {
+  PENDING
+  COMPLETED
+  COMPENSATING
+  COMPENSATED
+  FAILED
+}
+
+// ─── Booking ─────────────────────────────────────────────────────────────────
+// Core booking record linking a user to a train schedule with seat assignments
+
+model Booking {
+  id             String        @id @default(uuid())
+  userId         String
+  scheduleId     String
+  trainId        String
+  trainNumber    String
+  trainName      String
+  departureDate  DateTime      @db.Date
+  status         BookingStatus @default(PENDING)
+  totalAmount    Float         @default(0)
+  seatCount      Int
+  fromStationId  String?       // Segment booking: boarding station ID
+  toStationId    String?       // Segment booking: alighting station ID
+  fromSeq        Int?          // Segment booking: sequence number of boarding station
+  toSeq          Int?          // Segment booking: sequence number of alighting station
+  idempotencyKey String        @unique
+  paymentOrderId String?       @unique
+  lockExpiresAt  DateTime?
+  failureReason  String?
+  version        Int           @default(0)  // Optimistic concurrency control
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  seats      BookingSeat[]
+  passengers Passenger[]
+  sagaLog    SagaLog[]
+
+  @@index([userId])
+  @@index([scheduleId])
+  @@index([status])
+  @@index([lockExpiresAt, status])
+  @@map("bookings")
+}
+
+// ─── BookingSeat ─────────────────────────────────────────────────────────────
+// Individual seat assignment within a booking (many-to-one relationship)
+
+model BookingSeat {
+  id         String   @id @default(uuid())
+  bookingId  String
+  seatId     String
+  seatNumber Int
+  seatType   String
+  price      Float
+  createdAt  DateTime @default(now())
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@unique([bookingId, seatId])
+  @@map("booking_seats")
+}
+
+// ─── Passenger ──────────────────────────────────────────────────────────────
+// Traveller details linked to a booking (one passenger per seat)
+
+model Passenger {
+  id        String   @id @default(uuid())
+  bookingId String
+  name      String
+  age       Int
+  gender    String
+  seatId    String?
+  createdAt DateTime @default(now())
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@map("passengers")
+}
+
+// ─── SagaLog ────────────────────────────────────────────────────────────────
+// Audit trail for each saga step — enables compensation on failure
+
+model SagaLog {
+  id        String         @id @default(uuid())
+  bookingId String
+  step      SagaStep
+  status    SagaStepStatus @default(PENDING)
+  request   Json?
+  response  Json?
+  error     String?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId])
+  @@map("saga_logs")
+}
+
+// ─── IdempotencyRecord ──────────────────────────────────────────────────────
+// Stores responses for processed booking requests to prevent duplicate creation
+
+model IdempotencyRecord {
+  id          String   @id @default(uuid())
+  eventKey    String   @unique
+  response    Json?
+  processedAt DateTime @default(now())
+
+  @@index([eventKey])
+  @@map("idempotency_records")
+}
